@@ -4,6 +4,22 @@ from pathlib import Path
 from typing import List, Optional
 
 
+def _create_zipinfo(filename: str) -> zipfile.ZipInfo:
+    info = zipfile.ZipInfo(filename=filename)
+    info.flag_bits |= 0x800
+    info.compress_type = zipfile.ZIP_DEFLATED
+    return info
+
+
+def _decode_filename(info: zipfile.ZipInfo) -> str:
+    if info.flag_bits & 0x800:
+        return info.filename
+    try:
+        return info.filename.encode('cp437').decode('gbk')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return info.filename
+
+
 def zip_directory(source_dir: str, output_path: str, include_hidden: bool = False) -> str:
     source_path = Path(source_dir).resolve()
     if not source_path.is_dir():
@@ -24,7 +40,11 @@ def zip_directory(source_dir: str, output_path: str, include_hidden: bool = Fals
             for file in files:
                 file_path = Path(root) / file
                 arcname = file_path.relative_to(source_path)
-                zipf.write(file_path, arcname)
+                with open(file_path, 'rb') as f:
+                    data = f.read()
+                info = _create_zipinfo(str(arcname))
+                info.file_size = len(data)
+                zipf.writestr(info, data)
 
     return str(output)
 
@@ -55,7 +75,11 @@ def zip_files(file_paths: List[str], output_path: str, base_dir: Optional[str] =
             else:
                 arcname = path.name
 
-            zipf.write(path, arcname)
+            with open(path, 'rb') as f:
+                data = f.read()
+            info = _create_zipinfo(str(arcname))
+            info.file_size = len(data)
+            zipf.writestr(info, data)
 
     return str(output)
 
@@ -76,7 +100,15 @@ def unzip_file(zip_path: str, extract_dir: str, password: Optional[str] = None) 
     with zipfile.ZipFile(zip_file, 'r') as zipf:
         if pwd:
             zipf.setpassword(pwd)
-        zipf.extractall(extract_path)
+        for info in zipf.infolist():
+            filename = _decode_filename(info)
+            if info.is_dir():
+                (extract_path / filename).mkdir(parents=True, exist_ok=True)
+            else:
+                target_path = extract_path / filename
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                with zipf.open(info, pwd=pwd) as source, open(target_path, 'wb') as target:
+                    target.write(source.read())
 
     return str(extract_path)
 
@@ -97,7 +129,7 @@ def list_zip_contents(zip_path: str, password: Optional[str] = None) -> List[dic
             zipf.setpassword(pwd)
         for info in zipf.infolist():
             contents.append({
-                'name': info.filename,
+                'name': _decode_filename(info),
                 'size': info.file_size,
                 'compressed_size': info.compress_size,
                 'is_dir': info.is_dir(),
