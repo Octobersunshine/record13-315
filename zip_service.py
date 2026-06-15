@@ -1,5 +1,5 @@
 import os
-import zipfile
+import pyzipper as zipfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -20,7 +20,7 @@ def _decode_filename(info: zipfile.ZipInfo) -> str:
         return info.filename
 
 
-def zip_directory(source_dir: str, output_path: str, include_hidden: bool = False) -> str:
+def zip_directory(source_dir: str, output_path: str, include_hidden: bool = False, password: Optional[str] = None) -> str:
     source_path = Path(source_dir).resolve()
     if not source_path.is_dir():
         raise ValueError(f"源路径不是一个目录: {source_dir}")
@@ -31,7 +31,13 @@ def zip_directory(source_dir: str, output_path: str, include_hidden: bool = Fals
 
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as zipf:
+    pwd = password.encode('utf-8') if password else None
+    compression = zipfile.ZIP_DEFLATED
+    encryption = zipfile.WZ_AES if password else None
+
+    with zipfile.ZipFile(output, 'w', compression=compression, encryption=encryption) as zipf:
+        if pwd:
+            zipf.setpassword(pwd)
         for root, dirs, files in os.walk(source_path):
             if not include_hidden:
                 dirs[:] = [d for d in dirs if not d.startswith('.')]
@@ -49,7 +55,7 @@ def zip_directory(source_dir: str, output_path: str, include_hidden: bool = Fals
     return str(output)
 
 
-def zip_files(file_paths: List[str], output_path: str, base_dir: Optional[str] = None) -> str:
+def zip_files(file_paths: List[str], output_path: str, base_dir: Optional[str] = None, password: Optional[str] = None) -> str:
     if not file_paths:
         raise ValueError("文件路径列表不能为空")
 
@@ -61,7 +67,13 @@ def zip_files(file_paths: List[str], output_path: str, base_dir: Optional[str] =
 
     base_path = Path(base_dir).resolve() if base_dir else None
 
-    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as zipf:
+    pwd = password.encode('utf-8') if password else None
+    compression = zipfile.ZIP_DEFLATED
+    encryption = zipfile.WZ_AES if password else None
+
+    with zipfile.ZipFile(output, 'w', compression=compression, encryption=encryption) as zipf:
+        if pwd:
+            zipf.setpassword(pwd)
         for file_path in file_paths:
             path = Path(file_path).resolve()
             if not path.is_file():
@@ -156,6 +168,7 @@ def main():
     zip_parser.add_argument('source', help='源文件夹路径')
     zip_parser.add_argument('output', help='输出 ZIP 文件路径')
     zip_parser.add_argument('--include-hidden', action='store_true', help='包含隐藏文件')
+    zip_parser.add_argument('--password', help='ZIP 文件加密密码（AES 加密）')
 
     unzip_parser = subparsers.add_parser('unzip', help='解压 ZIP 文件')
     unzip_parser.add_argument('zip_file', help='ZIP 文件路径')
@@ -173,8 +186,11 @@ def main():
 
     if args.command == 'zip':
         try:
-            result = zip_directory(args.source, args.output, args.include_hidden)
-            print(f"压缩成功: {result}")
+            result = zip_directory(args.source, args.output, args.include_hidden, args.password)
+            if args.password:
+                print(f"压缩成功（已加密）: {result}")
+            else:
+                print(f"压缩成功: {result}")
         except Exception as e:
             print(f"压缩失败: {e}")
             exit(1)
